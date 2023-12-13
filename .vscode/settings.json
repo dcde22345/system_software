@@ -1,0 +1,5 @@
+{
+  "code-runner.executorMap": {
+    "java": "cd $dir && javac -encoding utf-8 $fileName && java $fileNameWithoutExt"
+  }
+}
