@@ -1,6 +1,6 @@
 import java.io.*;
-import java.math.BigInteger;
 import java.util.ArrayList;
+import java.util.Scanner;
 
 class Instruction {
     String Label = "";
@@ -26,6 +26,16 @@ class Instruction {
     }
 
     Instruction() {
+    };
+}
+
+class TextRecord {
+    String type = "T";
+    String startingAddress = "";
+    String length = "";
+    String objectCode = "";
+
+    TextRecord() {
     };
 }
 
@@ -60,8 +70,15 @@ public class SICXE {
         ArrayList<Instruction> instructions = new ArrayList<>();
         ArrayList<SYMBOL> SYMTAB = new ArrayList<>();
         ArrayList<String> location = new ArrayList<>();
-        String fileName = "./system_software/Figure2.1.txt";
+        Scanner sc = new Scanner(System.in);
+
+        System.out.println("請輸入檔案位置");
+        String fileName = sc.nextLine();
+        sc.close();
         pass1(fileName, instructions, SYMTAB, location, op_TAB);
+
+        System.out.println("SYMTAB");
+        System.out.println("---------------------");
         for (SYMBOL item : SYMTAB) {
             System.out.println(item.symbol + "\t" + item.loction);
         }
@@ -74,14 +91,6 @@ public class SICXE {
                 j++;
             }
         }
-        System.out.println("---------\n\n");
-
-        for (Instruction tmp : instructions) {
-            System.out.println(tmp.Loction + "\t" + tmp.Label + "\t" + tmp.Statement + "\t" + tmp.Operand);
-
-        }
-        System.out.println("---------\n\n");
-
         pass2(instructions, SYMTAB, op_TAB);
     }
 
@@ -200,6 +209,8 @@ public class SICXE {
             String recordFile = "record.txt";
             FileWriter objectFw = new FileWriter(objectProgramFilePath);
             FileWriter recordFw = new FileWriter(recordFile);
+            String format = "%1$-6s%2$-8s%3$-6s%4$12s%5$10s\n";
+            int i = 0;
 
             // 第一行確認有無START並建立Head record
             if (instructions.get(0).Statement.equals("START")) {
@@ -207,28 +218,26 @@ public class SICXE {
                 int start = Integer.parseInt(startInstruction.Operand, 16);
                 int end = Integer.parseInt(instructions.get(instructions.size() - 2).Loction, 16) + 1;
                 int size = end - start;
+                objectFw.write(String.format(format, startInstruction.Loction, startInstruction.Label,
+                        startInstruction.Statement, startInstruction.Operand, startInstruction.objectCode));
+
                 recordFw.write("H" + String.format("%1$-6s", startInstruction.Label) + "\t"
                         + String.format("%06X", start) + String.format("%06X", size) + "\n");
+                i++;
             }
 
-            // 初始化Text record
-            StringBuilder textRecord = new StringBuilder();
-            int textRecordLength = 0;
-
-            int i = 1;
             Instruction tmp;
+            String previousLoc = instructions.get(0).Loction;
             String decoded = "00";
             String addressingMode;
             String operandAddr = "0000";
-            String format = "|%1$-6s|%2$-8s|%3$-6s|%4$12s|%5$-10s\n";
+            TextRecord tr = new TextRecord();
 
             while (!instructions.get(i).Statement.equals("END")) {
                 // 直到END前持續
                 tmp = instructions.get(i);
                 // 重制
                 addressingMode = "0";
-
-
                 if (!tmp.comment) {
                     // instruction不是comment
                     for (String[] opCode : op_TAB) {
@@ -249,40 +258,78 @@ public class SICXE {
                                 // tmp.Operand欄為空
                                 operandAddr = "0000";
                             }
+                            String bin = HexToBinary(operandAddr);
+                            String hex = combineAndToHex(addressingMode, bin);
+                            tmp.objectCode = decoded + padLeftZeros(hex, 4);
 
-                            System.out.format(format, tmp.Loction, tmp.Label, tmp.Statement, tmp.Operand, operandAddr);
+                            // 處理Text Record
+                            if (tr.objectCode.length() + tmp.objectCode.length() > 60
+                                    || Integer.parseInt(hexMinus(tmp.Loction, previousLoc), 16) >= 31) {
+                                // 若tr.objectCode超過60或tr.length超過1E則寫出來並重置
+                                tr.length = hexMinus(instructions.get(i).Loction, tr.startingAddress);
+                                recordFw.write(tr.type + tr.startingAddress + tr.length + tr.objectCode + "\n");
+                                tr.objectCode = "";
+                            }
+                            if (tr.objectCode.equals("")) {
+                                // 新的record
+                                tr.startingAddress = padLeftZeros(tmp.Loction, 6);
+                            }
+                            // 舊有record
+                            tr.objectCode += tmp.objectCode;
+                            previousLoc = tmp.Loction;
                             break;
-                            // operandAddr = Integer.toBinaryString(Integer.valueOf(operandAddr));
                         }
                     }
                     if (tmp.Statement.equals("BYTE") || tmp.Statement.equals("WORD")) {
-                        if(tmp.Operand.contains("C")){
+                        if (tmp.Operand.contains("C")) {
                             // 儲存字串
                             operandAddr = "";
-                            for(int k = 2; k <tmp.Operand.length() - 1; k++){
+                            for (int k = 2; k < tmp.Operand.length() - 1; k++) {
                                 int acsii = tmp.Operand.charAt(k);
                                 String acsiiString = String.format("%2X", acsii);
                                 operandAddr += acsiiString;
                             }
                             tmp.objectCode = operandAddr;
 
-                        }
-                        else if(tmp.Operand.contains("X")){
+                        } else if (tmp.Operand.contains("X")) {
                             // 儲存暫存器位址
-                            tmp.objectCode = tmp.Operand.substring(2,tmp.Operand.length() - 1);
-                        }else{
+                            tmp.objectCode = tmp.Operand.substring(2, tmp.Operand.length() - 1);
+                        } else {
                             // 儲存常數
-                            String bin = toBinary(tmp.Operand);
+                            String bin = DecimalToBinary(tmp.Operand);
                             String hex = combineAndToHex(addressingMode, bin);
                             tmp.objectCode = String.format("%06d", Integer.valueOf(hex));
                         }
-                        System.out.format(format, tmp.Loction, tmp.Label, tmp.Statement, tmp.Operand, tmp.objectCode);
+                        // 處理Text Record
+                        if (tr.objectCode.length() + tmp.objectCode.length() > 60
+                                || Integer.parseInt(hexMinus(tmp.Loction, previousLoc), 16) >= 31) {
+                            // 若tr.objectCode超過60或tr.length超過1E則寫出來並重置
+                            tr.length = hexMinus(instructions.get(i).Loction, tr.startingAddress);
+                            recordFw.write(tr.type + tr.startingAddress + tr.length + tr.objectCode+ "\n");
+                            tr.objectCode = "";
+                        }
+                        if (tr.objectCode.equals("")) {
+                            // 新的record
+                            tr.startingAddress = padLeftZeros(tmp.Loction, 6);
+                        }
+                        // 舊有record
+                        tr.objectCode += tmp.objectCode;
+                        previousLoc = tmp.Loction;
                     }
                 }
+                objectFw.write(String.format(format, tmp.Loction, tmp.Label, tmp.Statement, tmp.Operand,
+                        tmp.objectCode.toUpperCase()));
                 i++;
             }
+            recordFw.write(tr.type + tr.startingAddress + tr.length + tr.objectCode + "\n");
 
-            
+
+            Instruction endInstruction = instructions.get(i);
+            objectFw.write(String.format(format, endInstruction.Loction, endInstruction.Label, endInstruction.Statement,
+                    endInstruction.Operand, endInstruction.objectCode));
+
+            recordFw.write("E" + String.format("%06X", Integer.parseInt(instructions.get(0).Loction, 16)) + "\n");
+
             objectFw.close();
             recordFw.close();
 
@@ -327,12 +374,44 @@ public class SICXE {
         return "0000";
     }
 
-    public static String toBinary(String operand){
+    public static String DecimalToBinary(String operand) {
         return String.format("%016d", Long.valueOf(Integer.toBinaryString(Integer.valueOf(operand))));
     }
 
-    public static String combineAndToHex(String addressingMode, String bin){
-        String tmp = addressingMode.concat(bin.substring(1));
-        return Integer.toHexString(Integer.valueOf(tmp,2));
+    public static String HexToBinary(String operand) {
+        return String.format("%016d", Long.valueOf(Integer.toBinaryString(Integer.valueOf(operand, 16))));
     }
+
+    public static String combineAndToHex(String addressingMode, String bin) {
+        String tmp = addressingMode.concat(bin.substring(1));
+        return Integer.toHexString(Integer.valueOf(tmp, 2));
+
+    }
+
+    public static String padLeftZeros(String inputString, int length) {
+        if (inputString.length() >= length) {
+            return inputString;
+        }
+        StringBuilder sb = new StringBuilder();
+        while (sb.length() < length - inputString.length()) {
+            sb.append('0');
+        }
+        sb.append(inputString);
+
+        return sb.toString();
+    }
+
+    public static String hexMinus(String a, String b) {
+        int aValue = Integer.parseInt(a, 16);
+        int bValue = Integer.parseInt(b, 16);
+
+        // 計算
+        int result = aValue - bValue;
+
+        // 轉換為16進位string
+        String resultHex = Integer.toHexString(result).toUpperCase();
+
+        return resultHex;
+    }
+
 }

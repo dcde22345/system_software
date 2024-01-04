@@ -1,1 +1,0 @@
-"H" + String.format("%1$-6s",startInstruction.Label) + "\t" + String.format("%06X", start) + String.format("%6X", (end - start))
